@@ -1,0 +1,67 @@
+services:
+  db:
+    image: postgres:16-alpine
+    container_name: gaikovert-db
+    restart: always
+    environment:
+      POSTGRES_USER: gaikovert
+      POSTGRES_PASSWORD: gaikovert
+      POSTGRES_DB: gaikovert
+    ports:
+      - "5432:5432"
+    volumes:
+      - db_data:/var/lib/postgresql/data
+      - ./db/init:/docker-entrypoint-initdb.d
+    networks:
+      - backend
+    healthcheck:
+      test: ["CMD", "pg_isready", "-q", "-d", "gaikovert", "-U", "gaikovert"]
+      timeout: 45s
+      interval: 10s
+      retries: 10
+
+  panel:
+    build:
+      context: ./panel
+      args:
+        HTTP_PROXY: "${HTTP_PROXY:-}"
+        HTTPS_PROXY: "${HTTPS_PROXY:-}"
+        NO_PROXY: "${NO_PROXY:-}"
+    environment:
+      DB_HOST: db
+      DB_PORT: "5432"
+      DB_NAME: gaikovert
+      DB_USER: gaikovert
+      DB_PASSWORD: gaikovert
+    depends_on:
+      db:
+        condition: service_healthy
+    networks:
+      - backend
+    ports:
+      - "8001:8000"
+
+  panel-ui:
+    build:
+      context: ./panel-ui
+      args:
+        HTTP_PROXY: "${HTTP_PROXY:-}"
+        HTTPS_PROXY: "${HTTPS_PROXY:-}"
+        NO_PROXY: "${NO_PROXY:-}"
+        # Браузер ходит в Panel не через docker-сеть, а по адресу на хосте —
+        # отсюда localhost:8001, а не "panel" (имя сервиса недоступно из браузера).
+        VITE_PANEL_API_URL: "${VITE_PANEL_API_URL:-http://localhost:8001}"
+    depends_on:
+      - panel
+    ports:
+      - "8002:80"
+
+  # front, constructor — пока не реализованы (см. CLAUDE.md, в этой сессии
+  # договорились начать с Panel и отложить виртуализацию).
+
+volumes:
+  db_data:
+
+networks:
+  backend:
+    driver: bridge
