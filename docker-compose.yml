@@ -56,11 +56,85 @@ services:
     ports:
       - "8002:80"
 
-  # front, constructor — пока не реализованы (см. CLAUDE.md, в этой сессии
-  # договорились начать с Panel и отложить виртуализацию).
+  # Guacamole — настоящий (не заглушка): guacd + webapp + своя БД (отдельная от
+  # gaikovert, схему генерирует сам образ guacamole, см. guacamole/db-init/).
+  guacamole-db:
+    image: postgres:16-alpine
+    container_name: gaikovert-guacamole-db
+    restart: always
+    environment:
+      POSTGRES_USER: guacamole
+      POSTGRES_PASSWORD: guacamole
+      POSTGRES_DB: guacamole
+    volumes:
+      - guacamole_db_data:/var/lib/postgresql/data
+      - ./guacamole/db-init:/docker-entrypoint-initdb.d
+    networks:
+      - backend
+    healthcheck:
+      test: ["CMD", "pg_isready", "-q", "-d", "guacamole", "-U", "guacamole"]
+      timeout: 45s
+      interval: 10s
+      retries: 10
+
+  guacd:
+    image: guacamole/guacd:1.5.5
+    container_name: gaikovert-guacd
+    restart: always
+    networks:
+      - backend
+
+  guacamole:
+    image: guacamole/guacamole:1.5.5
+    container_name: gaikovert-guacamole
+    restart: always
+    environment:
+      GUACD_HOSTNAME: guacd
+      POSTGRESQL_HOSTNAME: guacamole-db
+      POSTGRESQL_DATABASE: guacamole
+      POSTGRESQL_USER: guacamole
+      POSTGRESQL_PASSWORD: guacamole
+    depends_on:
+      guacd:
+        condition: service_started
+      guacamole-db:
+        condition: service_healthy
+    networks:
+      - backend
+    ports:
+      - "8003:8080"
+
+  constructor:
+    build:
+      context: ./constructor
+      args:
+        HTTP_PROXY: "${HTTP_PROXY:-}"
+        HTTPS_PROXY: "${HTTPS_PROXY:-}"
+        NO_PROXY: "${NO_PROXY:-}"
+    environment:
+      VM_DRIVER: "${VM_DRIVER:-mock}"
+      GUACAMOLE_BASE_URL: http://guacamole:8080/guacamole
+      # Браузер (через Front) ходит не по docker-service-name — тот же приём,
+      # что VITE_PANEL_API_URL для PanelUI.
+      GUACAMOLE_PUBLIC_URL: "${GUACAMOLE_PUBLIC_URL:-http://localhost:8003/guacamole}"
+      GUACAMOLE_ADMIN_USER: guacadmin
+      GUACAMOLE_ADMIN_PASSWORD: guacadmin
+      GUACAMOLE_DATA_SOURCE: postgresql
+      # Куда "указывать" Guacamole-подключения в mock-режиме, т.к. реальных VM
+      # (libvirt/KVM) в этом окружении нет — см. constructor/README.md.
+      MOCK_VM_HOST: "${MOCK_VM_HOST:-guacd}"
+    depends_on:
+      - guacamole
+    networks:
+      - backend
+    ports:
+      - "8004:8000"
+
+  # front — пока не реализован (см. CLAUDE.md).
 
 volumes:
   db_data:
+  guacamole_db_data:
 
 networks:
   backend:
